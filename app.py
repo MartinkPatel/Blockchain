@@ -1,49 +1,93 @@
-from fastapi import FastAPI, UploadFile, File, Form,HTTPException
+from decimal import Decimal
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
 import backend
 
 app = FastAPI()
 
-# Request/response models
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Replace "*" with a specific domain like "http://localhost:3000" in production
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, OPTIONS, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
-class Message(BaseModel):
-    walletid : str
-    url: str
-    dataset: str
+backend.b_init()
+for i in range(8):
+    backend.init_contract(10)
+# Request model
+class SubmitModel(BaseModel):
+    walletid: str
+    hf_url: str
+    dataset_size: int
+    client_index: int
 
+# Response model for submit-model
+class SubmitResponse(BaseModel):
+    message: str
+    success: bool
+# Response model for get-balance
+class BalanceResponse(BaseModel):
+    balance: str  # Use string to handle Decimal safely
 
+class RewardResponse(BaseModel):
+    reward: int  # Use string to handle Decimal safely
+# Response model for withdrawal
+class WithdrawResponse(BaseModel):
+    message: str
+    success: bool
+@app.post("/submit-model", response_model=SubmitResponse)
+async def processModelSubmit(request: SubmitModel):
+    try:
+        print(f"Received request: {request.dict()}")
 
-class LLMResponse(BaseModel):
-    response: str
+        # Simulate processing (replace with your backend logic)
+        if not request.hf_url.startswith("https://huggingface.co/"):
+            raise HTTPException(status_code=400, detail="Invalid Hugging Face URL.")
+        if request.dataset_size <= 0:
+            raise HTTPException(status_code=400, detail="Dataset size must be positive.")
 
-@app.post("/submit", response_model=LLMResponse)
-async def query_llm(request: Message):
-    walletid = Message.walletid
-    hugging_face_url = Message.url
-    dataset_details = Message.dataset
-
-    # Call your LLM here and get a response (pseudo-code)
-
-    return {"response": f'''{walletid} {hugging_face_url} {dataset_details} '''}
-
-@app.post("/voice_query", response_model=LLMResponse)
-async def query_llm_with_audio(file: UploadFile = File(...)):
-    # # Code to handle audio processing and then send to LLM
-    # print(file)
-    # audio_data = await file.read()  # Read audio data from file
-    # llm_response = model.stt(audio_data)  # Pseudo function
-    # return {"response": llm_response}
-
-    if file.content_type != "audio/x-wav":
-        raise HTTPException(status_code=400, detail="Invalid file type. Only WAV audio files are supported.")
-
-    # Read audio data from file
-    audio_data = await file.read()
-    if not audio_data:
-        raise HTTPException(status_code=400, detail="Uploaded audio file is empty.")
-
-    # Call the pseudo STT model function to process audio
-    return {"response": "gsdsds"}
-
-# Replace `run_llm` and `process_audio_and_query_llm` with actual implementations
+        backend.update_model("wallet_id", request.client_index)
+        return SubmitResponse(message="Model submitted successfully!", success=True)
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error.")
+@app.get("/withdraw", response_model=WithdrawResponse)
+async def withdraw(client_index: int = Query(..., description="Index of the client")):
+    try:
+        # Call the backend function to withdraw rewards
+        result = backend.withdraw_rewards(client_index)
+        
+        # Check the result
+        if result == "0 Balance or withdrawal Failed":
+            raise HTTPException(status_code=400, detail="Withdrawal failed: 0 balance or error.")
+        
+        return WithdrawResponse(message="Withdrawal successful!", success=True)
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error.")
+@app.get("/get-balance", response_model=BalanceResponse)
+async def get_balance(client_index: int = Query(..., description="Index of the client")):
+    try:
+        balance = backend.check_current_balance(client_index)
+        if isinstance(balance, Decimal):
+            balance = str(balance)  # Convert Decimal to string
+        return BalanceResponse(balance=balance)
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error.")
+    
+@app.get("/get-reward", response_model=RewardResponse)
+async def get_balance(client_index: int = Query(..., description="Index of the client")):
+    try:
+        reward = backend.check_reward(client_index)
+        # # print(reward.dtype)
+        # if isinstance(reward, int):
+        #     reward = str(reward)  # Convert Decimal to string
+        return RewardResponse(reward=reward)
+    except Exception as e:
+        print(f"Error: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error.")
